@@ -57,7 +57,10 @@ def parse_args():
         "--train_file", type=str, default=None, help="A csv or a json file containing the training data."
     )
     parser.add_argument(
-        "--validation_file", type=str, default=None, help="A csv or a json file containing the validation data."
+        "--valid_file", type=str, default=None, help="A csv or a json file containing the valid data."
+    )
+    parser.add_argument(
+        "--test_file", type=str, default=None, help="A csv or a json file containing the test data."
     )
     parser.add_argument(
         "--do_eval", type=str, default=None, help="do evaluation"
@@ -118,7 +121,7 @@ def parse_args():
         type=int,
         default=None,
         help=(
-            "The maximum total sequence length for validation "
+            "The maximum total sequence length for valid "
             "target text after tokenization.Sequences longer than this will be truncated, sequences shorter will be "
             "padded. Will default to `max_target_length`.This argument is also used to override the ``max_length`` "
             "param of ``model.generate``, which is used during ``evaluate`` and ``predict``."
@@ -239,15 +242,15 @@ def parse_args():
     args = parser.parse_args()
 
     # Sanity checks
-    if args.dataset_name is None and args.train_file is None and args.validation_file is None:
-        raise ValueError("Need either a dataset name or a training/validation file.")
+    if args.dataset_name is None and args.train_file is None and args.valid_file is None:
+        raise ValueError("Need either a dataset name or a training/valid file.")
     else:
         if args.train_file is not None:
             extension = args.train_file.split(".")[-1]
             assert extension in ["csv", "json"], "`train_file` should be a csv or a json file."
-        if args.validation_file is not None:
-            extension = args.validation_file.split(".")[-1]
-            assert extension in ["csv", "json"], "`validation_file` should be a csv or a json file."
+        if args.valid_file is not None:
+            extension = args.valid_file.split(".")[-1]
+            assert extension in ["csv", "json"], "`valid_file` should be a csv or a json file."
 
 
     return args
@@ -348,12 +351,12 @@ def main():
         data_files = {}
         if args.train_file is not None:
             data_files["train"] = args.train_file
-        if args.validation_file is not None:
-            data_files["validation"] = args.validation_file
+        if args.valid_file is not None:
+            data_files["valid"] = args.valid_file
         extension = args.train_file.split(".")[-1]
         raw_datasets = load_dataset(extension, data_files=data_files)
-        if args.validation_file is not None and args.max_predict_samples is not None:
-            raw_datasets["validation"] = raw_datasets["validation"].select(range(min(args.max_predict_samples, len(raw_datasets["validation"]))))
+        if args.valid_file is not None and args.max_predict_samples is not None:
+            raw_datasets["valid"] = raw_datasets["valid"].select(range(min(args.max_predict_samples, len(raw_datasets["valid"]))))
 
 
 
@@ -444,7 +447,7 @@ def main():
         )
 
     train_dataset = processed_datasets["train"]
-    eval_dataset = processed_datasets["validation"]
+    eval_dataset = processed_datasets["valid"]
 
     # Log a few random samples from the training set:
     for index in random.sample(range(len(train_dataset)), 1):
@@ -520,10 +523,10 @@ def main():
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
         experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value
-        accelerator.init_trackers(project_name="roc_stories", config=experiment_config, init_kwargs={"wandb": {"name": "roc_baseline"}})
+        accelerator.init_trackers(project_name="chid", config=experiment_config, init_kwargs={"wandb": {"name": "chid_"+args.output_dir.split("/")[-1]}})
 
     # Metric
-    metric = evaluate.load("exact_match")
+    metric = evaluate.load("./src/metrics/exact_match")
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
