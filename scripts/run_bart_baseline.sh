@@ -8,9 +8,9 @@ CUDA_VISIBLE_DEVICES=3,4 accelerate launch --multi_gpu --mixed_precision=fp16 ${
     --train_file ${path_to_dataset}/train_data_${data_size}.json \
     --valid_file ${path_to_dataset}/test_data.json \
     --num_beams 5 \
-    --max_predict_samples 2000 \
-    --do_train \
-    --do_eval every \
+    --max_predict_samples 1000 \
+    --do_eval once \
+    --do_predict \
     --preprocessing_num_workers 4 \
     --output_dir ${path_to_output} \
     --learning_rate 2e-5 \
@@ -20,5 +20,5 @@ CUDA_VISIBLE_DEVICES=3,4 accelerate launch --multi_gpu --mixed_precision=fp16 ${
     --num_train_epochs 6 \
     --with_tracking \
     --report_to wandb \
-    --resume_from_checkpoint ${path_to_output}/epoch_2 \
+    --resume_from_checkpoint ${path_to_output}/epoch_5 \
     --checkpointing_steps epoch 2>&1 | tee -a ${log_path}

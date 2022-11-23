@@ -66,7 +66,10 @@ def parse_args():
         "--do_eval", type=str, default=None, help="do evaluation"
     )
     parser.add_argument(
-        "--do_train", action="store_true", help="do evaluation"
+        "--do_train", action="store_true", help="do train"
+    )
+    parser.add_argument(
+        "--do_predict", action="store_true", help="do predict"
     )
     parser.add_argument(
         "--max_predict_samples",
@@ -265,6 +268,9 @@ def eval_step(args, model, eval_dataloader, tokenizer, metric, accelerator, conf
         "max_length": args.val_max_target_length if args is not None else config.max_length,
         "num_beams": args.num_beams,
     }
+    pred_list = list()
+    label_list = list()
+    input_list = list()
     for step, batch in enumerate(tqdm(eval_dataloader, desc="Generating text")):
         with torch.no_grad():
             generated_tokens = accelerator.unwrap_model(model).generate(
@@ -291,6 +297,11 @@ def eval_step(args, model, eval_dataloader, tokenizer, metric, accelerator, conf
                 generated_tokens = generated_tokens[0]
             decoded_preds = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
             decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+            inputs = tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=False)
+
+            pred_list += decoded_preds
+            label_list += decoded_labels
+            input_list += inputs
 
             decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
             metric.add_batch(
@@ -301,6 +312,19 @@ def eval_step(args, model, eval_dataloader, tokenizer, metric, accelerator, conf
     result = {f"eval/{k}": round(v * 100, 4) for k, v in result.items()}
 
     logger.info(result)
+
+    if args.do_predict and accelerator.is_main_process:
+        output_list = list()
+        for pred, label, ipt in zip(pred_list, label_list, input_list):
+            output_list.append(dict({
+                "pred": pred,
+                "label": label,
+                "input": ipt
+            }))
+        with open(os.path.join(args.output_dir, "predict_output.json"), "w") as f:
+            json.dump(output_list, f, ensure_ascii=False, indent=2)
+        
+        
     return result
 
 
