@@ -9,6 +9,9 @@ __pycache__/
 # vscode
 .vscode/
 
+# dataset
+dataset/
+
 # MAC
 .DS_Store
 
