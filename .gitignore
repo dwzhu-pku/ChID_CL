@@ -11,6 +11,8 @@ __pycache__/
 
 # dataset
 dataset/
+# output
+output/
 
 # MAC
 .DS_Store
