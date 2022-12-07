@@ -14,6 +14,8 @@ OUTPUT_PATH = '../dataset/'
 dict1_path = os.path.join(DEFAULT_RAW_PATH, 'chinese-idioms-12976.txt')
 dict2_path = os.path.join(DEFAULT_RAW_PATH, 'xinhua-idiom.json')
 
+universe_set_path = os.path.join(OUTPUT_PATH, 'train_data_10w.json')
+
 output1_path = os.path.join(OUTPUT_PATH, 'idiom-dict1.json')
 output2_path = os.path.join(OUTPUT_PATH, 'idiom-dict2.json')
 
@@ -31,12 +33,26 @@ def produce_samples(dict_df: pd.DataFrame, output_path: str):
     idioms = dict_df['word'].values
     # only use idioms with length == 4
     idioms = idioms[np.array([len(idiom) == 4 for idiom in idioms])]
-    # print(idioms)
+    dataset = []
+    # only need words in universe set
+    with open(universe_set_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            dataset.append(json.loads(line))
+    universe_set = []
+    for data in dataset:
+        for cands in data['candidates']:
+            universe_set.extend(cands)
+    universe_set =set(universe_set)
+    idioms =np.array(list(idiom for idiom in idioms if idiom in universe_set))
+    print(idioms)
+
 
     # create a list of samples
     samples_from_dict = []
-    for i in tqdm(range(len(idioms))):
+    for i in tqdm(range(len(dict_df))):
         idiom = dict_df['word'][i]
+        if idiom not in idioms:
+            continue
         sample = {}
         sample[groundTruth_tag] = [idiom]
 
@@ -53,33 +69,33 @@ def produce_samples(dict_df: pd.DataFrame, output_path: str):
             sample[realCount_tag] = 1
             samples_from_dict.append(copy.deepcopy(sample))
 
-        # from example to get the candidates
-        if not pd.isnull(dict_df['example'][i]):
-            cands = np.random.choice(
-                idioms[idioms != idiom], candidate_num-1, replace=False).tolist()
-            cands.append(idiom)
-            np.random.shuffle(cands)
-            sample[candidates_tag] = [cands]
+        # # from example to get the candidates
+        # if not pd.isnull(dict_df['example'][i]):
+        #     cands = np.random.choice(
+        #         idioms[idioms != idiom], candidate_num-1, replace=False).tolist()
+        #     cands.append(idiom)
+        #     np.random.shuffle(cands)
+        #     sample[candidates_tag] = [cands]
 
-            content = dict_df['example'][i].replace('～', '#idiom#')
-            if '#idiom#' in content:
-                sample[content_tag] = content
-                sample[realCount_tag] = 1
-                samples_from_dict.append(copy.deepcopy(sample))
+        #     content = dict_df['example'][i].replace('～', '#idiom#')
+        #     if '#idiom#' in content:
+        #         sample[content_tag] = content
+        #         sample[realCount_tag] = 1
+        #         samples_from_dict.append(copy.deepcopy(sample))
 
-        # from derivation to get the candidates
-        if not pd.isnull(dict_df['derivation'][i]):
-            cands = np.random.choice(
-                idioms[idioms != idiom], candidate_num-1, replace=False).tolist()
-            cands.append(idiom)
-            np.random.shuffle(cands)
-            sample[candidates_tag] = [cands]
+        # # from derivation to get the candidates
+        # if not pd.isnull(dict_df['derivation'][i]):
+        #     cands = np.random.choice(
+        #         idioms[idioms != idiom], candidate_num-1, replace=False).tolist()
+        #     cands.append(idiom)
+        #     np.random.shuffle(cands)
+        #     sample[candidates_tag] = [cands]
 
-            content = dict_df['derivation'][i].replace(idiom, '#idiom#')
-            if '#idiom#' in content:
-                sample[content_tag] = content
-                sample[realCount_tag] = 1
-                samples_from_dict.append(copy.deepcopy(sample))
+        #     content = dict_df['derivation'][i].replace(idiom, '#idiom#')
+        #     if '#idiom#' in content:
+        #         sample[content_tag] = content
+        #         sample[realCount_tag] = 1
+        #         samples_from_dict.append(copy.deepcopy(sample))
 
     # save the samples
     with open(output_path, 'w', encoding='utf-8') as f:
