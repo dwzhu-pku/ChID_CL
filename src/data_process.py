@@ -29,14 +29,14 @@ def produce_samples(dict_df: pd.DataFrame, output_path: str):
         f'producing samples from {dict_df.shape[0]} idioms, saving to {output_path}')
     # get all the idioms
     idioms = dict_df['word'].values
+    # only use idioms with length == 4
+    idioms = idioms[np.array([len(idiom) == 4 for idiom in idioms])]
     # print(idioms)
 
     # create a list of samples
     samples_from_dict = []
     for i in tqdm(range(len(idioms))):
         idiom = dict_df['word'][i]
-        if len(idiom) != 4:
-            continue
         sample = {}
         sample[groundTruth_tag] = [idiom]
 
