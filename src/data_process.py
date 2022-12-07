@@ -35,6 +35,8 @@ def produce_samples(dict_df: pd.DataFrame, output_path: str):
     samples_from_dict = []
     for i in tqdm(range(len(idioms))):
         idiom = dict_df['word'][i]
+        if len(idiom) != 4:
+            continue
         sample = {}
         sample[groundTruth_tag] = [idiom]
 
