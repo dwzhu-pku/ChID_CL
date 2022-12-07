@@ -18,6 +18,22 @@ def predict_error(data_filename: str, output_dir: str = DEFAULT_OUTPUT_DIR, pred
     acc_rate = correct_num / total_num
     return {'acc_rate': acc_rate, 'correct_num': correct_num, 'total_num': total_num}
 
+def vague_error(data_filename: str, output_dir: str = DEFAULT_OUTPUT_DIR, predict_name: str = 'pred', label_name: str = 'label', min_match_num: int = 3) -> TypedDict(
+    'RetType', {'acc_rate': float, 'correct_num': int, 'total_num': int}):
+    '''
+    calculate vague prediction error from a file.
+    '''
+    data = pd.read_json(os.path.join(output_dir, data_filename))
+    # count the match bits of a pair of string, possibly with different length
+    def match_bits(s1: str, s2: str) -> int:
+        min_len = min(len(s1), len(s2))
+        return sum([s1[i] == s2[i] for i in range(min_len)])
+    # calculate the vague error rate
+    correct_num = len(data[data.apply(lambda x: match_bits(x[predict_name], x[label_name]) >= min_match_num, axis=1)])
+    total_num = len(data)
+    acc_rate = correct_num / total_num
+    return {'acc_rate': acc_rate, 'correct_num': correct_num, 'total_num': total_num}
+
 def dataset_stat(dataset_file: str, groundTruth_name: str = 'groundTruth', candidates_name: str = 'candidates') -> None:
     '''
     print dataset statistics
