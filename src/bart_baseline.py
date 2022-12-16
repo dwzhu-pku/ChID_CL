@@ -35,7 +35,9 @@ from transformers import (
 )
 from transformers.utils import send_example_telemetry
 
-from transformers.models.bart import BartTokenizer, BartConfig, BartForConditionalGeneration
+from transformers.models.bart import BartTokenizer, BartConfig
+
+from chid_bart import ChidBartForConditionalGeneration
 
 # init logger
 logger = get_logger(__name__)
@@ -262,6 +264,7 @@ def parse_args():
 def eval_step(args, model, eval_dataloader, tokenizer, metric, accelerator, config, postprocess_text):
     model.eval()
     logger.info("Start evaluating")
+    print("*************Eval*************")
     if args.val_max_target_length is None:
         args.val_max_target_length = args.max_target_length
 
@@ -274,9 +277,23 @@ def eval_step(args, model, eval_dataloader, tokenizer, metric, accelerator, conf
     input_list = list()
     for step, batch in enumerate(tqdm(eval_dataloader, desc="Generating text")):
         with torch.no_grad():
+
+            def prefix_allowed_tokens_fn(batch_id, input_ids):
+                candidate_list = batch["candidates"][batch_id].tolist()
+                if len(input_ids) == 0:
+                    wd_list = [102]
+                elif len(input_ids) == 1:
+                    wd_list = [101]
+                elif 2 <= len(input_ids) <= 5:
+                    wd_list = [x[len(input_ids)-2] for x in candidate_list]
+                else:
+                    wd_list = [102]
+                return wd_list
+
             generated_tokens = accelerator.unwrap_model(model).generate(
                 batch["input_ids"],
                 attention_mask=batch["attention_mask"],
+                # prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
                 **gen_kwargs,
             )
 
@@ -287,9 +304,12 @@ def eval_step(args, model, eval_dataloader, tokenizer, metric, accelerator, conf
             # If we did not pad to max length, we need to pad the labels too
             labels = accelerator.pad_across_processes(batch["labels"], dim=1, pad_index=tokenizer.pad_token_id)
 
-            generated_tokens, labels = accelerator.gather_for_metrics((generated_tokens, labels))
+            inputs = accelerator.pad_across_processes(batch["input_ids"], dim=1, pad_index=tokenizer.pad_token_id)
+
+            generated_tokens, labels, inputs = accelerator.gather_for_metrics((generated_tokens, labels, inputs))
             generated_tokens = generated_tokens.cpu().numpy()
             labels = labels.cpu().numpy()
+            inputs = inputs.cpu().numpy()
 
             if args.ignore_pad_token_for_loss:
                 # Replace -100 in the labels as we can't decode them.
@@ -298,11 +318,21 @@ def eval_step(args, model, eval_dataloader, tokenizer, metric, accelerator, conf
                 generated_tokens = generated_tokens[0]
             decoded_preds = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
             decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
-            inputs = tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=False)
+            inputs = tokenizer.batch_decode(inputs, skip_special_tokens=False)
 
-            pred_list += decoded_preds
-            label_list += decoded_labels
-            input_list += inputs
+            def remove_special(item_list):
+                new_list = list()
+                for item in item_list:
+                    item = item.replace("[SEP]","")
+                    item = item.replace("[PAD]","")
+                    item = item.replace("[CLS]","")
+                    item = item.replace(" ","")
+                    new_list.append(item)
+                return new_list
+
+            pred_list += remove_special(decoded_preds)
+            label_list += remove_special(decoded_labels)
+            input_list += remove_special(inputs)
 
             decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
             metric.add_batch(
@@ -316,12 +346,16 @@ def eval_step(args, model, eval_dataloader, tokenizer, metric, accelerator, conf
 
     if args.do_predict and accelerator.is_main_process:
         output_list = list()
+        print("#labels", len(label_list))
+        print("#preds", len(pred_list))
+        print("#inputs", len(input_list))
         for pred, label, ipt in zip(pred_list, label_list, input_list):
             output_list.append(dict({
                 "pred": pred,
                 "label": label,
                 "input": ipt
             }))
+        print("#output", len(output_list))
         with open(os.path.join(args.output_dir, "predict_output.json"), "w") as f:
             json.dump(output_list, f, ensure_ascii=False, indent=2)
         
@@ -331,6 +365,7 @@ def eval_step(args, model, eval_dataloader, tokenizer, metric, accelerator, conf
 
 
 def main():
+    print(1)
     args = parse_args()
     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
@@ -344,7 +379,7 @@ def main():
     if args.with_tracking:
         accelerator_log_kwargs["log_with"] = args.report_to
         accelerator_log_kwargs["logging_dir"] = args.output_dir
-
+    print(2)
     accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, **accelerator_log_kwargs)
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
@@ -367,7 +402,11 @@ def main():
     # Handle the repository creation
     if accelerator.is_main_process and args.output_dir is not None:
         os.makedirs(args.output_dir, exist_ok=True)
+    print(3)
     accelerator.wait_for_everyone()
+
+    print(4)
+
 
     if args.dataset_name is not None:
         # Downloading and loading a dataset from the hub.
@@ -382,14 +421,16 @@ def main():
         raw_datasets = load_dataset(extension, data_files=data_files)
         if args.valid_file is not None and args.max_predict_samples is not None:
             raw_datasets["valid"] = raw_datasets["valid"].select(range(min(args.max_predict_samples, len(raw_datasets["valid"]))))
-
+        if args.train_file is not None and args.do_train == False:
+            raw_datasets["train"] = raw_datasets["train"].select(range(min(128, len(raw_datasets["train"])))) # if not do train, only need to load a small portion of train data
 
 
     config = BartConfig.from_pretrained(args.model_name_or_path)
 
     tokenizer = BertTokenizer.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
+    tokenizer.add_tokens(["喑","揠", "岿", "鹬", "鸩", "忾", "聩", "缛","逑","囵","诨","殚","颦","龇","枥","坼", "迳", "绌", "愎", "“", "”", "嚬", "黩", "殄", "锱"])
 
-    model = BartForConditionalGeneration.from_pretrained(args.model_name_or_path)
+    model = ChidBartForConditionalGeneration.from_pretrained(args.model_name_or_path)
 
     embedding_size = model.get_input_embeddings().weight.shape[0]
     if len(tokenizer) > embedding_size:
@@ -429,17 +470,17 @@ def main():
         labels = examples["labels"]
         # truncate the first sentences.
         for i, sentence in enumerate(first_sentences):
-            if len(sentence) <= 500:
+            if len(sentence) <= 400: # to avoid truncating important info
                 continue
             if sentence.find(tokenizer.mask_token*4) > len(sentence) // 2:
-                first_sentences[i] = sentence[-500:]
+                first_sentences[i] = sentence[-400:]
             else:
-                first_sentences[i] = sentence[:500]
+                first_sentences[i] = sentence[:400]
         
         inputs = list()
         for content, candidate in zip(first_sentences, candidates):
-            candidate = ", ".join(candidate)
-            inputs.append(f"{content} 选项：{candidate} 正确答案为：")
+            candidate = "，".join(candidate)
+            inputs.append(f"{content} 选项：{candidate}。正确答案为：")
         
         model_inputs = tokenizer(
             inputs,
@@ -449,6 +490,8 @@ def main():
         )
         labels = tokenizer(text_target=labels, max_length=args.max_target_length, truncation=True)
         model_inputs["labels"] = labels["input_ids"]
+        tokenized_candidates = [[tokenizer.convert_tokens_to_ids(list(candidate)) for candidate in candidates]for candidates in examples['candidates']]
+        model_inputs["candidates"] = tokenized_candidates
         model_inputs.pop("token_type_ids", None)
         
         return model_inputs
@@ -614,7 +657,8 @@ def main():
                 lr_scheduler.step()
                 optimizer.zero_grad()
                 step_loss = {"train/epoch": epoch, "train/step":step+num_update_steps_per_epoch*epoch, "train/loss": loss.item()}
-                accelerator.log(step_loss, step=step+num_update_steps_per_epoch)
+                if args.with_tracking:
+                    accelerator.log(step_loss, step=step+num_update_steps_per_epoch)
                 if step % 100 == 0:
                     logger.info(step_loss)
 
